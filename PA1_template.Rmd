@@ -1,25 +1,210 @@
 ---
-title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
+title: "Reproducible Research Project 1"
+output: html_document
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
 
-## Loading and preprocessing the data
+```{r, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+```
+## Exploratory data analysis
+
+### Code for reading in the dataset and/or processing the data
+
+```{r}
+setwd("C:\\Users\\piotr\\OneDrive\\JH_DS\\RR")
+if(!file.exists(("./data"))){dir.create("./data")}
+
+dataUrl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+
+download.file(dataUrl, destfile = "activity.zip")
+unzip(zipfile = "./activity.zip", exdir = "./data")
+```
+
+Read file:
+```{r}
+data <- read_csv("./data/activity.csv")
+```
+### 2. Histogram of the total number of steps taken each day
+
+Calculate and plot total number of steps each day:
+
+```{r}
+steps_per_day <- data %>%
+                  group_by(date) %>%
+                  summarize(steps_per_day = sum(steps))
 
 
+ggplot(steps_per_day, aes(x = steps_per_day)) +
+  geom_histogram(bins = 16,
+                 color = "black",
+                 fill = "white",
+                 alpha = 0.4) +
+  xlab("no. of steps") +
+  ggtitle("Total Number of Steps Taken per Day")
+```
+The 0 values doesn't make much sense - it is unlikely that a person wouldn't move all day. It is probably caused by participants not wearing the device on a given day at all.
 
-## What is mean total number of steps taken per day?
+### 3. Mean and median number of steps taken each day
 
 
+On usual, people took around 10 000 steps per day.
 
-## What is the average daily activity pattern?
+```{r}
+mean_data <- mean(steps_per_day$steps_per_day, na.rm = TRUE)
+median_data <- median(steps_per_day$steps_per_day, na.rm = TRUE)
+cat("No. of steps:\n")
+cat("mean: ", mean_data, "\nsmedian: ", median_data)
+```
+The mean and the median are roughly equal - this was to be expected, as the histogram is quite symmetrical.
+
+## Average daily activity pattern
+### 4. Time series plot of the 5 minute interval (x) and averaged number of steps taken averaged across all days (y)
 
 
+Calculate and plot average number of steps for each interval:
+```{r}
+avg_steps_per_interval <- data %>%
+                            group_by(interval) %>%
+                            summarize(steps_per_interval = mean(steps, na.rm = TRUE))
+
+ggplot(avg_steps_per_interval, aes(interval, steps_per_interval)) +
+  geom_line() +
+  xlab("interval") +
+  ylab("average no. of steps") +
+  ggtitle("Average Number of Steps per Interval")
+```
+
+
+### 5. The 5-minute interval that, on average, contains the maximum number of steps:
+```{r}
+avg_steps_per_interval[which.max(avg_steps_per_interval$steps_per_interval), 1]
+```
 
 ## Imputing missing values
 
+### 6. Code to describe and show a strategy for imputing missing data
+
+The total number of rows containing NAs:
+
+```{r}
+cat("number of missing values: ", sum(is.na(data)))
+```
+We have to consider two scenarios:
+1. There are days with no data at all
+2. There are some intervals with no data
+Let's plot the missing values vs date to verify these hypotheses:
+```{r}
+data %>%
+  group_by(date) %>%
+  mutate(missing_data = sum(is.na(steps))) %>%
+  ggplot(aes(date, missing_data)) +
+  geom_col() +
+  xlab("date") +
+  ylab("no. of steps") +
+  ggtitle("Days with Missing No. of Steps")
+
+data %>%
+  group_by(date) %>%
+  summarize(steps_per_day = sum(steps)) %>%
+  ggplot(aes(date, steps_per_day)) +
+  geom_line() +
+  xlab("date") +
+  ylab("no. of steps") +
+  ggtitle("No. of Steps Taken Each Day")
+```
+
+There are 8 days with no data at all and all the other days have complete data. There is no obvious pattern (i.e. incomplete data only for given days of the week/month). Therefore, there are two options to impute missing data and I will discuss both of them:
+1. Impute the NA values with mean or median calculated for each day - this solution will lead to losing information about the intervals, as we will only impute the mean no. of steps per each day instead of per interval.
+2. Averaging over the interval and replace NA values - this solution looks more sophisticated, but will blur the pattern between weekdays and weekends (which we neeed to compare later).
+Therefore, for the sake of clarity and not to overcomplicate the problem, we can impute the missing data with either median or mean, as they are almost equal and therefore will not disturb the symmetry of the distribution.
+
+```{r}
+data_imputed <- steps_per_day %>%
+                  replace(is.na(.), median_data)
+head(data_imputed)
+```
+### 7. Histogram of the total number of steps taken each day after missing values are imputed
+
+We can visually inspect the imputed data points. The black points are the original values and the read color indicates imputed data. The lines are just an interpolation between the points.
+```{r}
+ggplot(data_imputed, aes(x = date, y = steps_per_day)) +
+  geom_line(color = "red") +
+  geom_point(color = "red") +
+  geom_line(data = steps_per_day) +
+  geom_point(data = steps_per_day) +
+  xlab("date") +
+  ylab("no. of steps") +
+  ggtitle("No. of Steps Taken Each Day")
+```
+ 
+
+### 4A. Histogram of the total number of steps taken each day with missing data filled in
+Let's join the original and imputed dataframe and label the replaced values to see how the histogram has changed:
+```{r}
+# transform data from wide to long format
+data_imputed_lf <- data_imputed %>%
+  bind_cols(steps_per_day[, 2]) %>%
+  rename(date = date,
+         imputed_data = steps_per_day,
+         original_data = steps_per_day1) %>%
+  gather(key = "data",
+         value = "no_of_steps",
+         -date)
+head(data_imputed_lf)
+
+# plot histogram
+ggplot(data_imputed_lf, aes(x = no_of_steps, 
+                            fill = data, 
+                            color = data)) +
+  geom_histogram(bins = 16,
+                 alpha = 0.3,
+                 position = "identity") +
+  xlab("no. of steps") +
+  ggtitle("Number of Steps Taken per Day (original vs. imputed data)")
+
+```
+As expected, there are more observations with the no. of steps corresponding to median no. of steps.
+
+### 4B. Calculate and report the mean and median total number of steps taken per day. Do these values differ from the estimates from the first part of the assignment? What is the impact of imputing missing data on the estimates of the total daily number of steps?
 
 
-## Are there differences in activity patterns between weekdays and weekends?
+By looking at these histograms, we can assume that median should not be affected and the mean will change only slightly:
+
+```{r}
+data_imputed_lf %>%
+  group_by(data) %>%
+  summarize(mean = mean(no_of_steps, na.rm = TRUE),
+            median = median(no_of_steps, na.rm = TRUE))
+```
+### 9. Panel plot comparing the average number of steps taken per 5-minute interval across weekdays and weekends
+
+To compare the activity during weekdays and weekends, I have used `weekdays()` function to label each day by date and then labeled Saturdays and Sundays as weekends and the rest of the days as weekdays. As mentioned above, due to the chosen strategy to impute missing data, here I compare the datasets with simply removing NA values.
+```{r}
+# change system locale to get English day names
+Sys.setlocale("LC_TIME","C")
+
+weekdays <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
+weekend <- c("Saturday", "Sunday")
+
+data %>%
+  na.omit() %>%
+  mutate(weekday = weekdays(date)) %>%
+  group_by(weekday, interval) %>%
+  mutate(steps_per_interval = mean(steps),
+         part_of_week = case_when(weekday %in%  weekdays == TRUE ~ "weekday",
+                                  weekday %in%  weekend == TRUE ~ "weekend")) %>%
+  ggplot(aes(x = interval, y = steps_per_interval)) +
+  geom_line() +
+  facet_grid(part_of_week ~ .) +
+  xlab("Interval") +
+  ylab("Mean No of. Steps") +
+  ggtitle("Comparison of Activity During Weekdays and Weekends")
+
+```
+
+On average, the activity is higher during weekdays and more spread across the intervals. It looks like on the weekend the subjects prefered to rest.
